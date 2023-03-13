@@ -17,26 +17,103 @@ MODULE_VERSION("0.1");
 /* MAX_LENGTH is set to 92 because
  * ssize_t can't fit the number > 92
  */
-#define MAX_LENGTH 92
+#define MAX_LENGTH 100
 
 static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
-static long long fib_sequence(long long k)
+void swap_char(char *a, char *b)
 {
-    /* FIXME: C99 variable-length array (VLA) is not allowed in Linux kernel. */
-    long long f[k + 2];
+    *a = *a ^ *b;
+    *b = *a ^ *b;
+    *a = *a ^ *b;
+}
 
-    f[0] = 0;
-    f[1] = 1;
+int rev_core(char *head, int idx)
+{
+    if (head[idx] != '\0') {
+        int end = rev_core(head, idx + 1);
+        if (idx > end / 2)
+            swap_char(head + idx, head + end - idx);
+        return end;
+    }
+    return idx - 1;
+}
 
-    for (int i = 2; i <= k; i++) {
-        f[i] = f[i - 1] + f[i - 2];
+char *reverse(char *s)
+{
+    if (!s)
+        return NULL;
+    rev_core(s, 0);
+    return s;
+}
+
+void add_str(char *num1, char *num2, char *result)
+{
+    size_t len1 = strlen(num1), len2 = strlen(num2);
+    int i, sum, carry = 0;
+    reverse(num1);
+    reverse(num2);
+    if (len1 >= len2) {
+        for (i = 0; i < len2; i++) {
+            sum = (num1[i] - '0') + (num2[i] - '0') + carry;
+            result[i] = '0' + sum % 10;
+            carry = sum / 10;
+        }
+        for (i = len2; i < len1; i++) {
+            sum = (num1[i] - '0') + carry;
+            result[i] = '0' + sum % 10;
+            carry = sum / 10;
+        }
+    } else {
+        for (i = 0; i < len1; i++) {
+            sum = (num1[i] - '0') + (num2[i] - '0') + carry;
+            result[i] = '0' + sum % 10;
+            carry = sum / 10;
+        }
+
+        for (i = len1; i < len2; i++) {
+            sum = (num2[i] - '0') + carry;
+            result[i] = '0' + sum % 10;
+            carry = sum / 10;
+        }
     }
 
-    return f[k];
+    if (carry)
+        result[i++] = '0' + carry;
+
+    result[i] = '\0';
+    reverse(num1);
+    reverse(num2);
+    reverse(result);
+}
+
+struct BigN {
+    char string[128];
+};
+
+static long long fib_sequence(long long k, char *buf)
+{
+    struct BigN *f = kmalloc(sizeof(struct BigN) * (k + 1), GFP_KERNEL);
+
+    if (!f) {
+        return -ENOMEM;
+    }
+
+    strncpy(f[0].string, "0", 1);
+    strncpy(f[1].string, "1", 1);
+
+    for (int i = 2; i <= k; i++)
+        add_str(f[i - 1].string, f[i - 2].string, f[i].string);
+
+    int len = strlen(f[k].string) + 1;
+
+    if (__copy_to_user(buf, f[k].string, len))
+        return -EFAULT;
+
+    return len;
 }
 
 static int fib_open(struct inode *inode, struct file *file)
@@ -60,7 +137,7 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_sequence(*offset);
+    return (ssize_t) fib_sequence(*offset, buf);
 }
 
 /* write operation is skipped */
