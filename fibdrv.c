@@ -6,6 +6,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/types.h>
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -90,27 +91,118 @@ void add_str(char *num1, char *num2, char *result)
     reverse(result);
 }
 
-struct BigN {
-    char string[128];
-};
+void mul_str(char *num1, char *num2, char *result)
+{
+    if (num1[0] == '0' || num2[0] == '0') {
+        strncpy(result, "0", 1);
+        return;
+    }
+
+    int len1 = strlen(num1), len2 = strlen(num2);
+    int i, j, k = 0;
+
+    for (i = 0; i < len1 + len2; i++) {
+        result[i] = '0';
+    }
+
+    // Multiply each digit of num1 with each digit of num2
+    for (i = len1 - 1; i >= 0; i--) {
+        int carry = 0;
+        for (j = len2 - 1; j >= 0; j--) {
+            int sum = (num1[i] - '0') * (num2[j] - '0') +
+                      (result[i + j + 1] - '0') + carry;
+            carry = sum / 10;
+            result[i + j + 1] = (sum % 10) + '0';
+        }
+        result[i + j + 1] = carry + '0';
+    }
+
+    // Remove leading zeros from result array
+    i = 0;
+    while (result[i] == '0') {
+        i++;
+    }
+
+    // Copy result array to final result string
+    k = 0;
+    while (i < len1 + len2) {
+        result[k++] = result[i++];
+    }
+    result[k] = '\0';
+}
+
+void sub_str(char *num1, char *num2, char *result)
+{
+    reverse(num1);
+    reverse(num2);
+    strncpy(result, num1, strlen(num1));
+
+    int len2 = strlen(num2);
+
+    for (int i = 0; i < len2; i++) {
+        if (result[i] >= num2[i])
+            result[i] = (result[i] - '0') - (num2[i] - '0') + '0';
+        else {
+            // borrow
+            int k = 1;
+            while (result[i + k] == '0') {
+                result[i + k] = '9';
+                k++;
+            }
+            result[i + k] = result[i + k] - '1' + '0';
+
+            result[i] = (result[i] - '0' + 10) - (num2[i] - '0') + '0';
+        }
+    }
+
+    bool zero = true;
+    for (int i = strlen(result) - 1; i >= 0; i--) {
+        if (result[i] == '0')
+            result[i] = '\0';
+        else {
+            zero = false;
+            break;
+        }
+    }
+    if (zero)
+        result[0] = '0';
+
+    reverse(num1);
+    reverse(num2);
+    reverse(result);
+}
 
 static long long fib_sequence(long long k, char *buf)
 {
-    struct BigN *f = kmalloc(sizeof(struct BigN) * (k + 1), GFP_KERNEL);
+    int num_bits = sizeof(k) * 8 - __builtin_clzll(k);
+    char *t1 = kmalloc(128, GFP_KERNEL), *t2 = kmalloc(128, GFP_KERNEL);
+    char *a = kmalloc(128, GFP_KERNEL), *b = kmalloc(128, GFP_KERNEL);
+    char *tmp = kmalloc(128, GFP_KERNEL);
 
-    if (!f) {
-        return -ENOMEM;
+    strncpy(a, "0", 1);
+    strncpy(b, "1", 1);
+    for (int i = num_bits; i > 0; i--) {
+        mul_str("2", b, t1);
+        sub_str(t1, a, t2);
+        mul_str(a, t2, t1);
+
+        mul_str(a, a, t2);
+        mul_str(b, b, tmp);
+        add_str(t2, tmp, b);
+
+        strncpy(a, t1, strlen(t1));
+
+        if ((k >> (i - 1)) & 1) {
+            add_str(a, b, t1);
+            strncpy(a, b, strlen(b));
+            strncpy(b, t1, strlen(t1));
+        }
     }
+    printk("a: %s, b: %s\n", a, b);
 
-    strncpy(f[0].string, "0", 1);
-    strncpy(f[1].string, "1", 1);
+    int len = strlen(a) + 1;
 
-    for (int i = 2; i <= k; i++)
-        add_str(f[i - 1].string, f[i - 2].string, f[i].string);
-
-    int len = strlen(f[k].string) + 1;
-
-    if (__copy_to_user(buf, f[k].string, len))
+    if (__copy_to_user(buf, a, len))
         return -EFAULT;
 
     return len;
